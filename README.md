@@ -10,7 +10,9 @@ Running the server:
 `sbt "runMain akkastreamchat.Server 127.0.0.1 2842"`
 
 Running the client connecting to the server:
+
 `sbt "runMain akkastreamchat.Client 127.0.0.1 2842 tiger"`
+
 `sbt "runMain akkastreamchat.Client 127.0.0.1 2842 scott"`
 
 Client commands:
