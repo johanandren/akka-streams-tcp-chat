@@ -5,7 +5,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.event.Logging
 import akka.stream.ActorMaterializer
+import akka.stream.Attributes
 import akka.stream.Materializer
 import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.BroadcastHub
@@ -55,6 +57,7 @@ object Server {
       case th: Throwable =>
         th.printStackTrace()
         println("Usage: Server [host] [port]")
+        System.exit(1)
     }
   }
 
@@ -64,9 +67,12 @@ object Server {
   )(implicit system: ActorSystem, materializer: Materializer): Future[Tcp.ServerBinding] = {
     import system.dispatcher
 
+    // shared actorref -> broadcast into all connected streams
     val (broadcastActorRef, broadcastSource) = Source
-      .actorRef[ServerCommand](100, OverflowStrategy.dropNew)
+      .actorRef[ServerCommand](20, OverflowStrategy.dropNew)
+      .log("broadcast", _.toString)(system.log)
       .toMat(BroadcastHub.sink)(Keep.both)
+      .withAttributes(Attributes.logLevels(Logging.InfoLevel))
       .run()
 
     // shared user registry
@@ -85,6 +91,7 @@ object Server {
             remote.getPort
           )
 
+
           val connectionFlow: Flow[ByteString, ByteString, NotUsed] =
             Protocol.ClientCommand.decoder
               .takeWhile(_ != clientQuit)
@@ -92,8 +99,8 @@ object Server {
                 () =>
                   var session: Session = new InitialState(connectionId, users)
 
-                  {
-                    clientCommand =>
+                  { clientCommand =>
+
                       val response = clientCommand match {
                         case Success(command) =>
                           val (newSession, response) =
@@ -102,7 +109,7 @@ object Server {
                           response
                         case Failure(parseError) =>
                           DirectResponse(
-                            Alert(s"Invalid command: $parseError.getMessage")
+                            Alert(s"Invalid command: ${parseError.getMessage}")
                           )
                       }
                       response match {
@@ -114,23 +121,23 @@ object Server {
                       }
                   }
               }
-              .merge(broadcastSource)
+              .merge(broadcastSource, eagerComplete = true)
               .watchTermination() { (_, terminationFuture) =>
                 terminationFuture.onComplete { done =>
                   users
                     .entrySet()
                     .asScala
-                    .find(_.getValue == connectionId)
+                    .find { _.getValue == connectionId }
                     .foreach { entry =>
+                      users.remove(entry.getKey)
                       broadcastActorRef ! ServerCommand
-                        .Alert(s"${entry.getValue} disconnected")
+                        .Alert(s"${entry.getKey.name} disconnected")
                     }
                   system.log.info("Unregistered client {} because {}", connectionId, done)
                 }
                 NotUsed
               }
               .via(Protocol.ServerCommand.encoder)
-
 
           incomingConnection.handleWith(connectionFlow)
         })(Keep.left)
@@ -142,6 +149,8 @@ object Server {
 
   // small state machine for handling client commands
   private sealed trait Session {
+    // on a client command, returns the session for the next command
+    // and a potential response (directly back or broadcast to all connected)
     def handleRequest(command: ClientCommand): (Session, Response)
   }
 
@@ -156,16 +165,17 @@ object Server {
           if (users.putIfAbsent(newUsername, connectionId) == null) {
             (
               new Running(connectionId, newUsername, users),
-              DirectResponse(Welcome(newUsername, "Welcome to Akka Streams Chat!")) // FIXME also broadcast user joined
+              DirectResponse(Welcome(newUsername, "Welcome to Akka Streams Chat!"))
             )
           } else {
             (this, DirectResponse(Disconnect(s"${newUsername.name} already taken")))
           }
         case _ =>
-          (this, DirectResponse(Alert("Specify username first")))
+          (this, DirectResponse(Disconnect("Specify username first")))
       }
   }
 
+  // when identified anything goes
   private final class Running(
       connectionId: UUID,
       username: Username,
@@ -178,7 +188,7 @@ object Server {
         case ClientCommand.SendMessage(msg) if msg.startsWith("/") =>
           DirectResponse(Alert("Unknown command"))
         case ClientCommand.SendMessage(msg) =>
-          DirectResponse(Protocol.ServerCommand.Message(username, msg))
+          Broadcast(Protocol.ServerCommand.Message(username, msg))
       }
       (this, response)
     }
