@@ -16,7 +16,10 @@ Running the client connecting to the server:
 `sbt "runMain akkastreamchat.Client 127.0.0.1 2842 scott"`
 
 Client commands:
+
 `text` send to all connected users
+
 `/users` lists logged in users
+
 `/quit` disconnect and terminate client
 
