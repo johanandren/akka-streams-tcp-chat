@@ -6,6 +6,8 @@ but probably not _exactly_ 1:1 with the functionality of that.
 Not the greatest sample of backpressured async streams, but still quite fun little app covering quite a bit
 of Akka Stream APIs (and a little [Scodec](http://scodec.org) which made encoding/decoding the protocol a breeze)
 
+Requires a JVM 8+ and sbt installed to build and run.
+
 Running the server: 
 `sbt "runMain akkastreamchat.Server 127.0.0.1 2842"`
 
