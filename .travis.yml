@@ -1,0 +1,18 @@
+language:
+  - scala
+jdk:
+  - openjdk8
+scala:
+  - 2.13.1
+script:
+  - sbt ++$TRAVIS_SCALA_VERSION test
+
+before_cache:
+  - find $HOME/.sbt -name "*.lock" | xargs rm
+  - find $HOME/.ivy2 -name "ivydata-*.properties" | xargs rm
+cache:
+  directories:
+  - $HOME/.sbt/boot
+  - $HOME/.sbt/launchers
+  - $HOME/.ivy2
+  - $HOME/.cache/coursier
